@@ -35,6 +35,11 @@ self.onmessage=e=>{
   self.postMessage({id,type:'stage',stage:'Verifying'});
   const test=XLSX.read(output,{type:'array',cellFormula:true,cellStyles:true,cellDates:false,sheetStubs:false});
   const warnings=verify(original,test);
-  self.postMessage({id,type:'result',buffer:output,sheets:test.SheetNames.length,warnings},[output]);
+  // SheetJS writes a Uint8Array. postMessage transfer lists accept ArrayBuffer,
+  // not Uint8Array, so transfer the exact underlying byte range.
+  const exactBytes = output instanceof Uint8Array ? output : new Uint8Array(output);
+  const resultBuffer = (exactBytes.byteOffset === 0 && exactBytes.byteLength === exactBytes.buffer.byteLength)
+    ? exactBytes.buffer : exactBytes.slice().buffer;
+  self.postMessage({id,type:'result',buffer:resultBuffer,sheets:test.SheetNames.length,warnings},[resultBuffer]);
  }catch(err){self.postMessage({id,type:'failure',error:String(err?.message||err).slice(0,450)})}
 };
