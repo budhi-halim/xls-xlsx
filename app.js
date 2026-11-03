@@ -46,7 +46,7 @@ async function addFiles(files){
 function initWorker(){
  if(readyPromise)return readyPromise;
  readyPromise=new Promise((resolve,reject)=>{
-  try{worker=new Worker('./worker.js')}catch(e){reject(e);return}
+  try{worker=new Worker('./worker.js?v=20261103-2')}catch(e){reject(e);return}
   const timeout=setTimeout(()=>{clear();reject(Error('Spreadsheet library load timed out.'))},35000);
   function clear(){clearTimeout(timeout);worker.removeEventListener('message',listener)}
   function listener(e){if(e.data?.type==='ready'){clear();resolve(worker)}else if(e.data?.type==='engine-error'){clear();reject(Error(e.data.message))}}
