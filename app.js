@@ -1,83 +1,183 @@
 'use strict';
-(()=>{
- const $=id=>document.getElementById(id),ui={input:$('file-input'),drop:$('dropzone'),list:$('file-list'),count:$('queue-count'),add:$('add-btn'),clear:$('clear-btn'),convert:$('convert-btn'),zip:$('zip-btn'),progress:$('overall-progress'),fill:$('progress-fill'),track:$('progress-track'),percent:$('progress-percent'),label:$('progress-label'),message:$('message')};
- const jobs=[];let nextId=0,busy=false,worker=null,initPromise=null;
- const names={xml:'Excel 2003 XML',html:'HTML spreadsheet',biff:'Binary XLS',xlsx:'XLSX'};
- function el(tag,cls,text){const x=document.createElement(tag);if(cls)x.className=cls;if(text!==undefined)x.textContent=text;return x;}
- function size(n){return n<1048576?`${(n/1024).toFixed(1)} KB`:`${(n/1048576).toFixed(1)} MB`;}
- function message(text='',error=false){ui.message.textContent=text;ui.message.hidden=!text;ui.message.classList.toggle('error',error);}
- function progress(done,total,label){ui.progress.hidden=false;const n=Math.round(done/Math.max(1,total)*100);ui.track.setAttribute('aria-valuenow',String(n));ui.fill.style.width=n+'%';ui.percent.textContent=n+'%';ui.label.textContent=label;}
- function downloadBlob(data,name){const blob=new Blob([data],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),url=URL.createObjectURL(blob),a=el('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);}
- function render(){
-   ui.list.replaceChildren();ui.count.textContent=jobs.length;ui.clear.hidden=busy||!jobs.length;ui.add.hidden=busy||!jobs.length;
-   const waiting=jobs.filter(x=>x.status==='ready'||x.status==='error').length,loading=jobs.some(x=>x.status==='checking'),completed=jobs.filter(x=>x.status==='done').length;
-   ui.convert.disabled=busy||!waiting||loading;ui.convert.textContent=busy?'Converting…':waiting?'Convert '+waiting+' file'+(waiting===1?'':'s'):'Convert to XLSX';ui.zip.hidden=busy||completed<2;
-   if(!jobs.length)ui.list.append(el('p','empty','No files selected'));
-   for(const job of jobs){
-    const row=el('div','file-row'),icon=el('div','file-icon','XLS'),info=el('div','file-info'),name=el('div','file-name',job.file.name),meta=el('div','file-meta',`${size(job.file.size)} · ${job.type?names[job.type]:'Checking format'}`),actions=el('div','file-controls');name.title=job.file.name;
-    if(job.status==='error'){meta.textContent=job.error;meta.classList.add('error');actions.append(el('span','status error','Failed'));}
-    if(job.status==='checking')actions.append(el('span','status','Checking'));
-    if(job.status==='ready')actions.append(el('span','status','Ready'));
-    if(job.status==='working')actions.append(el('span','status',job.stage||'Converting'));
-    if(job.status==='done'){const btn=el('button','download','Download');btn.type='button';btn.addEventListener('click',()=>downloadBlob(job.bytes,job.output));actions.append(btn);}
-    if(!busy){const remove=el('button','remove','×');remove.type='button';remove.setAttribute('aria-label','Remove '+job.file.name);remove.addEventListener('click',()=>{jobs.splice(jobs.indexOf(job),1);render();});actions.append(remove);}
-    info.append(name,meta);row.append(icon,info,actions);ui.list.append(row);
-   }
- }
- function outputName(filename){return filename.replace(/\.(xls|xml|xlsx)$/i,'').replace(/[\\/:*?"<>|\x00-\x1f]/g,'_').slice(0,120)+'.xlsx';}
- async function add(files){
-  if(busy)return;message('');ui.progress.hidden=true;
-  const added=[],existing=new Set(jobs.map(j=>j.output.toLowerCase()));
-  for(const f of Array.from(files||[]).slice(0,Math.max(0,60-jobs.length))){
-   if(!/\.(xls|xml|xlsx)$/i.test(f.name))continue;
-   if(jobs.some(x=>x.file.name===f.name&&x.file.size===f.size&&x.file.lastModified===f.lastModified))continue;
-   let candidate=outputName(f.name),k=2;while(existing.has(candidate.toLowerCase()))candidate=outputName(f.name).slice(0,-5)+` (${k++}).xlsx`;existing.add(candidate.toLowerCase());
-   const j={id:++nextId,file:f,output:candidate,type:null,status:'checking',bytes:null,error:''};jobs.push(j);added.push(j);
+(() => {
+  const get = id => document.getElementById(id);
+  const ui = {
+    input:get('file-input'), drop:get('dropzone'), list:get('file-list'),
+    count:get('queue-count'), add:get('add-btn'), clear:get('clear-btn'),
+    convert:get('convert-btn'), zip:get('zip-btn'), progress:get('overall-progress'),
+    fill:get('progress-fill'), track:get('progress-track'),
+    percent:get('progress-percent'), label:get('progress-label'),
+    message:get('message')
+  };
+  const files = [];
+  const typeNames = {xml:'Excel 2003 XML',html:'HTML report',biff:'Binary XLS',xlsx:'XLSX'};
+  let serial = 0, busy = false, pythonReady = typeof window.convertWithPython === 'function';
+  window.addEventListener('python-converter-ready', () => {
+    pythonReady = true;
+    message('');
+    render();
+  });
+
+  function element(tag,cls,text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
   }
-  render();for(const j of added){try{if(j.file.size>75*1048576)throw Error('File exceeds 75 MB');const bytes=new Uint8Array(await j.file.slice(0,20000).arrayBuffer());j.type=LegacyConverter.detect(bytes);if(!j.type)throw Error('Unsupported file format');j.status='ready';}catch(e){j.status='error';j.error=String(e.message||e);}render();}
- }
- function workerReady(){
-  if(initPromise)return initPromise;
-  initPromise=new Promise((resolve,reject)=>{
-    try{worker=new Worker('./worker.js?v=3');}catch(e){reject(e);return;}
-    const timer=setTimeout(()=>{cleanup();reject(Error('Spreadsheet engine unavailable'));},30000);
-    function cleanup(){clearTimeout(timer);worker.removeEventListener('message',onmessage);}
-    function onmessage(e){if(e.data?.type==='ready'){cleanup();resolve(worker);}if(e.data?.type==='engine-error'){cleanup();reject(Error(e.data.message));}}
-    worker.addEventListener('message',onmessage);worker.addEventListener('error',()=>{cleanup();reject(Error('Conversion worker failed'));},{once:true});
-  }).catch(e=>{worker?.terminate();worker=null;initPromise=null;throw e;});return initPromise;
- }
- function runWorker(w,j,buffer){return new Promise((resolve,reject)=>{
-   const timer=setTimeout(()=>{cleanup();reject(Error('Conversion timed out'));},120000);
-   function cleanup(){clearTimeout(timer);w.removeEventListener('message',response);w.removeEventListener('error',failed);}
-   function failed(){cleanup();reject(Error('Conversion worker failed'));}
-   function response(e){const d=e.data;if(d?.id!==j.id)return;if(d.type==='result'){cleanup();resolve(new Uint8Array(d.buffer));}else if(d.type==='failure'){cleanup();reject(Error(d.error));}else if(d.type==='stage'){j.stage=d.stage;render();}}
-   w.addEventListener('message',response);w.addEventListener('error',failed);w.postMessage({id:j.id,buffer,format:j.type},[buffer]);
- });}
- async function convert(){
-  if(busy)return;const pending=jobs.filter(j=>j.status==='ready'||j.status==='error');if(!pending.length)return;
-  busy=true;message('');render();let completed=0,failed=0;
-  for(const j of pending){j.status='working';j.stage='Converting';render();progress(completed,pending.length,`${completed+1} of ${pending.length}`);
-   try{
-    const buffer=await j.file.arrayBuffer();let bytes;
-    if(j.type==='xml'||j.type==='html'){
-       await new Promise(r=>setTimeout(r,0)); // allow the progress indicator to paint
-       bytes=LegacyConverter.convert(buffer,j.type).bytes;
-    }else if(j.type==='xlsx'){bytes=new Uint8Array(buffer);}
-    else {const w=await workerReady();bytes=await runWorker(w,j,buffer);}
-    j.bytes=bytes;j.status='done';j.error='';
-   }catch(e){j.status='error';j.error=String(e.message||e);failed++;}
-   completed++;progress(completed,pending.length,`${completed} of ${pending.length}`);render();
+  const size = n => n < 1048576 ? (n/1024).toFixed(1)+' KB' : (n/1048576).toFixed(1)+' MB';
+  const outputName = s => (s.replace(/\.(xls|xml|xlsx)$/i,'').replace(/[\\/:*?"<>|\x00-\x1f]/g,'_').slice(0,120)||'workbook')+'.xlsx';
+  function message(text='',error=false) {
+    ui.message.textContent=text;
+    ui.message.classList.toggle('error',!!error);
+    ui.message.hidden=!text;
   }
-  busy=false;render();message(failed?`${pending.length-failed} converted, ${failed} failed`: `${completed} file${completed===1?'':'s'} converted`,false);
- }
- async function zip(){
-   const done=jobs.filter(x=>x.status==='done');if(done.length<2)return;ui.zip.disabled=true;ui.zip.textContent='Preparing ZIP…';
-   try{if(!window.JSZip)await new Promise((resolve,reject)=>{const s=el('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';s.onload=resolve;s.onerror=()=>reject(Error('ZIP library unavailable'));document.head.append(s);});
-    const z=new JSZip();for(const j of done)z.file(j.output,j.bytes);const archive=await z.generateAsync({type:'blob',compression:'DEFLATE'});const url=URL.createObjectURL(archive),a=el('a');a.href=url;a.download='converted-xlsx.zip';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
-   }catch(e){message(e.message||String(e),true);}finally{ui.zip.disabled=false;ui.zip.textContent='Download ZIP';}
- }
- ui.input.onchange=async e=>{await add(e.target.files);e.target.value='';};ui.add.onclick=()=>ui.input.click();ui.clear.onclick=()=>{if(!busy){jobs.length=0;ui.progress.hidden=true;message('');render();}};ui.convert.onclick=convert;ui.zip.onclick=zip;
- ['dragenter','dragover'].forEach(t=>ui.drop.addEventListener(t,e=>{e.preventDefault();ui.drop.classList.add('dragging');}));
- ['dragleave','dragend'].forEach(t=>ui.drop.addEventListener(t,e=>{e.preventDefault();ui.drop.classList.remove('dragging');}));
- ui.drop.addEventListener('drop',e=>{e.preventDefault();ui.drop.classList.remove('dragging');add(e.dataTransfer.files);});render();
+  function stage(done,total) {
+    const value = Math.round(done/Math.max(1,total)*100);
+    ui.progress.hidden=false;
+    ui.fill.style.width=value+'%';
+    ui.track.setAttribute('aria-valuenow',String(value));
+    ui.percent.textContent=value+'%';
+    ui.label.textContent=done+' / '+total;
+  }
+  function detect(bytes) {
+    const magic=[208,207,17,224,161,177,26,225];
+    if (magic.every((b,i)=>bytes[i]===b)) return 'biff';
+    if (bytes[0]===80 && bytes[1]===75) return 'xlsx';
+    const decoder = bytes[0]===255 && bytes[1]===254 ? new TextDecoder('utf-16le'):
+      bytes[0]===254 && bytes[1]===255 ? new TextDecoder('utf-16be'):new TextDecoder('utf-8');
+    const text=decoder.decode(bytes).replace(/^\uFEFF/,'').trimStart().toLowerCase();
+    if (text.includes('schemas-microsoft-com:office:spreadsheet') && /<(?:[\w-]+:)?workbook\b/.test(text)) return 'xml';
+    if (text.includes('<html') || text.includes('<table')) return 'html';
+    if (bytes[0]===9 && [0,2,4,8].includes(bytes[1])) return 'biff';
+    return null;
+  }
+  function saveBytes(bytes,name) {
+    const blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    saveBlob(blob,name);
+  }
+  function saveBlob(blob,name) {
+    const href=URL.createObjectURL(blob);
+    const a=element('a');
+    a.href=href;a.download=name;
+    document.body.append(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(href),60000);
+  }
+  function fromBase64(base64) {
+    const binary=atob(base64), out=new Uint8Array(binary.length);
+    for(let i=0;i<binary.length;i++) out[i]=binary.charCodeAt(i);
+    return out;
+  }
+  function render() {
+    ui.list.replaceChildren();
+    ui.count.textContent=String(files.length);
+    ui.clear.hidden=busy||!files.length;
+    ui.add.hidden=busy||!files.length;
+    const pending=files.filter(f=>f.status==='ready'||f.status==='error').length;
+    const done=files.filter(f=>f.status==='done').length;
+    ui.convert.disabled=busy||!pythonReady||!pending||files.some(f=>f.status==='checking');
+    ui.convert.textContent=busy?'Converting…':!pythonReady?'Loading converter…':pending?'Convert '+pending+' file'+(pending===1?'':'s'):'Convert to XLSX';
+    ui.zip.hidden=busy||done<2;
+    if(!files.length)ui.list.append(element('p','empty','No files'));
+    for(const file of files) {
+      const row=element('div','file-row'),icon=element('div','file-icon','XLS'),details=element('div','file-info');
+      const title=element('div','file-name',file.file.name);
+      title.title=file.file.name;
+      const hint=element('div','file-meta',file.status==='error'?file.error:
+        size(file.file.size)+' · '+(typeNames[file.type]||'Checking'));
+      if(file.status==='error')hint.classList.add('error');
+      details.append(title,hint);
+      const controls=element('div','file-controls');
+      if(file.status==='done'){
+        const btn=element('button','download','Download');
+        btn.type='button';btn.onclick=()=>saveBytes(file.bytes,file.output);
+        controls.append(btn);
+      } else controls.append(element('span',file.status==='error'?'status error':'status',
+        file.status==='checking'?'Checking':file.status==='ready'?'Ready':file.status==='working'?'Converting':'Failed'));
+      if(!busy){
+        const remove=element('button','remove','×');
+        remove.type='button';
+        remove.setAttribute('aria-label','Remove '+file.file.name);
+        remove.onclick=()=>{files.splice(files.indexOf(file),1);render();};
+        controls.append(remove);
+      }
+      row.append(icon,details,controls);ui.list.append(row);
+    }
+  }
+  async function add(selected) {
+    if(busy)return;
+    message('');ui.progress.hidden=true;
+    const used=new Set(files.map(x=>x.output.toLowerCase())),batch=[];
+    for(const f of Array.from(selected||[]).slice(0,Math.max(0,60-files.length))){
+      if(!/\.(xls|xlsx|xml)$/i.test(f.name))continue;
+      if(files.some(j=>j.file.name===f.name&&j.file.size===f.size&&j.file.lastModified===f.lastModified))continue;
+      let name=outputName(f.name),seq=2;
+      while(used.has(name.toLowerCase()))name=outputName(f.name).slice(0,-5)+' ('+(seq++)+').xlsx';
+      used.add(name.toLowerCase());
+      const job={id:++serial,file:f,output:name,status:'checking',type:null,error:'',bytes:null};
+      files.push(job);batch.push(job);
+    }
+    render();
+    for(const job of batch){
+      try{
+        if(job.file.size>75*1048576)throw Error('File exceeds 75 MB');
+        job.type=detect(new Uint8Array(await job.file.slice(0,35000).arrayBuffer()));
+        if(!job.type)throw Error('Unsupported file format');
+        job.status='ready';
+      }catch(e){job.status='error';job.error=String(e.message||e);}
+      render();
+    }
+  }
+  async function convert() {
+    if(busy || !pythonReady)return;
+    const queued=files.filter(j=>(j.status==='ready'||j.status==='error')&&j.type);
+    if(!queued.length)return;
+    busy=true;message('');render();stage(0,queued.length);
+    let errors=0;
+    for(let n=0;n<queued.length;n++){
+      const item=queued[n];
+      item.status='working';render();
+      try{
+        const result=JSON.parse(await window.convertWithPython(item.file));
+        if(!result.base64)throw Error('No XLSX data returned');
+        const bytes=fromBase64(result.base64);
+        if(bytes[0]!==80||bytes[1]!==75)throw Error('Invalid XLSX result');
+        item.bytes=bytes;
+        item.status='done';
+        item.error='';
+      }catch(e){
+        item.status='error';
+        item.error=(e?.message||String(e)).slice(0,250);
+        errors++;
+      }
+      stage(n+1,queued.length);render();
+      await new Promise(r=>setTimeout(r,0));
+    }
+    busy=false;render();
+    if(errors)message((queued.length-errors)+' converted, '+errors+' failed',true);
+  }
+  async function downloadZip() {
+    const complete=files.filter(j=>j.status==='done');
+    if(complete.length<2)return;
+    ui.zip.disabled=true;
+    try{
+      if(!window.JSZip)await new Promise((resolve,reject)=>{
+        const s=element('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+        s.onload=resolve;s.onerror=()=>reject(Error('Unable to load ZIP library'));
+        document.head.append(s);
+      });
+      const zip=new window.JSZip();
+      for(const file of complete)zip.file(file.output,file.bytes);
+      saveBlob(await zip.generateAsync({type:'blob',compression:'DEFLATE'}),'converted-xlsx.zip');
+    }catch(e){message(e.message||String(e),true);}
+    finally{ui.zip.disabled=false;}
+  }
+  ui.input.addEventListener('change',async e=>{await add(e.target.files);e.target.value='';});
+  ui.add.onclick=()=>ui.input.click();
+  ui.clear.onclick=()=>{if(busy)return;files.length=0;ui.progress.hidden=true;message('');render();};
+  ui.convert.onclick=convert;
+  ui.zip.onclick=downloadZip;
+  for(const event of ['dragenter','dragover'])ui.drop.addEventListener(event,e=>{e.preventDefault();ui.drop.classList.add('dragging');});
+  for(const event of ['dragleave','dragend'])ui.drop.addEventListener(event,e=>{e.preventDefault();ui.drop.classList.remove('dragging');});
+  ui.drop.addEventListener('drop',e=>{e.preventDefault();ui.drop.classList.remove('dragging');add(e.dataTransfer.files);});
+  render();
 })();
