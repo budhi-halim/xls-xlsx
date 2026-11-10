@@ -49,10 +49,10 @@ def hex_color(value):
         return None
     val = value.strip().lstrip('#')
     if re.fullmatch('[0-9a-fA-F]{6}', val):
-        return val.upper()
+        return 'FF' + val.upper()
     m = re.search(r'#[0-9a-fA-F]{6}', value)
     if m:
-        return m.group(0)[1:].upper()
+        return 'FF' + m.group(0)[1:].upper()
     return None
 
 
