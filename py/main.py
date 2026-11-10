@@ -1,18 +1,18 @@
-"""PyScript bridge. Workbook bytes remain within the current browser session."""
+"""PyScript bridge. Workbooks are processed locally in the browser."""
 import base64
+import json
 from pyscript import window, ffi
-from pyodide.ffi import to_js
 from converter import convert_bytes
 
 async def convert_uploaded_file(file):
     raw = await file.arrayBuffer()
-    data = bytes(window.Uint8Array.new(raw).to_py())
-    result, kind, sheets = convert_bytes(data, str(file.name))
-    return to_js({
-        "base64": base64.b64encode(result).decode("ascii"),
-        "format": kind,
-        "sheets": sheets,
-        "bytes": len(result)
+    source = bytes(window.Uint8Array.new(raw).to_py())
+    output, file_format, sheet_count = convert_bytes(source, str(file.name))
+    return json.dumps({
+        "base64": base64.b64encode(output).decode("ascii"),
+        "format": file_format,
+        "sheets": sheet_count,
+        "bytes": len(output),
     })
 
 window.convertWithPython = ffi.create_proxy(convert_uploaded_file)
