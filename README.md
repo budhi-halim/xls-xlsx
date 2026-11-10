@@ -1,49 +1,38 @@
 # XLS to XLSX Converter
 
-A mobile-friendly, client-side converter for legacy Excel spreadsheets.
+A client-side spreadsheet converter for mobile and desktop browsers.
 
-## Use
+**Application:** https://budhi-halim.github.io/xls-xlsx/
 
-The intended GitHub Pages URL is https://budhi-halim.github.io/xls-xlsx/ once GitHub Pages is enabled.
+## Supported files
 
-Choose or drag one or more files and select **Convert files**. Download results individually or as a ZIP.
+| Input | Handling |
+| --- | --- |
+| Excel 2003 SpreadsheetML (.xls, .xml) | Dedicated XML parser; retains worksheet names, cell contents, merged ranges, number formats, borders, colors, and alignment |
+| HTML table exported as .xls | Dedicated HTML parser; preserves table structure, spans, styled sections, and numeric Rupiah amounts |
+| Excel 97–2003 binary .xls | SheetJS Community Edition 0.20.3 fallback |
+| .xlsx | Returned unchanged |
 
-## Supported formats
+The converter detects the underlying file format from its contents, not its extension. XML and HTML files are processed without external dependencies. Binary XLS uses a static SheetJS library fetched on demand. ZIP download uses JSZip from a CDN; individual XLSX downloads do not need JSZip.
 
-- Binary Excel 97–2003 `.xls` workbooks.
-- Excel 2003 SpreadsheetML (XML), including XML documents saved with an `.xls` extension.
-- HTML-based spreadsheet exports.
-- Already-modern `.xlsx` files (validated and returned unchanged).
+All processing is performed in the user's browser. Source spreadsheet contents are not uploaded.
 
-File type is detected by reading its contents rather than trusting the filename.
+## Validation
 
-## Implementation
+The custom XML and HTML converter was tested against six original .xls samples and their separately generated Python-based XLSX references (three Laporan and three Rekap). For all three Rekap samples, every populated cell and merged range matched the reference. For Laporan, the source cell data, worksheet names, and merged ranges were preserved. The reference conversion had placed some final-row total values at different cell addresses; this converter retains their positions from the source XML.
 
-- Static HTML, CSS and JavaScript; no backend.
-- SheetJS Community Edition 0.20.3 reads and writes spreadsheet formats within a Web Worker.
-- JSZip 3.10.1 handles the optional ZIP download.
-- Source file contents are never sent to an application server. The browser fetches static code and dependencies over HTTPS.
-
-## Conversion limitations
-
-The app performs a local round-trip check of worksheet names, nonempty cell values and formulas, and merge counts. It reports detected differences.
-
-No converter can guarantee identical output for all legacy Excel features. Some formatting, charts, macros, images, embedded objects, external connections, and advanced features may not transfer. Review business-critical converted files before discarding originals.
-
-## Deployment
-
-In the repository, open **Settings → Pages**. Under **Build and deployment**, select **Deploy from a branch**, then **master** and **/(root)**. Save the settings. GitHub Pages may take a few minutes to publish.
+Tests covered browser conversion, single-file downloads, simultaneous Laporan/Rekap selection, and mobile-sized layouts. Converted files were independently imported with a spreadsheet library to check workbook validity. The six private reports are not included in this public repository.
 
 ## Local development
 
-In **PowerShell**, set the current working directory to your local clone of `xls-xlsx`. Run:
+In PowerShell, with the repository folder as the working directory:
 
 ```powershell
 py -m http.server 8000
 ```
 
-Visit http://localhost:8000/. The Web Worker requires an HTTP server rather than opening the HTML file with a `file://` URL.
+Open http://localhost:8000/. No build step or backend is required.
 
-## License
+## Limitations
 
-Original application code: MIT. Third-party dependencies have their own licenses.
+No guarantee of perfect preservation for charts, macros, embedded objects, and advanced features in arbitrary legacy files. In particular, the binary XLS fallback may not preserve all visual formatting. Review business-critical converted workbooks before replacing the originals.
