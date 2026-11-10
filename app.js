@@ -62,7 +62,8 @@
     if(j.type==='xml'||j.type==='html'){
        await new Promise(r=>setTimeout(r,0)); // allow the progress indicator to paint
        bytes=LegacyConverter.convert(buffer,j.type).bytes;
-    }else {const w=await workerReady();bytes=await runWorker(w,j,buffer);}
+    }else if(j.type==='xlsx'){bytes=new Uint8Array(buffer);}
+    else {const w=await workerReady();bytes=await runWorker(w,j,buffer);}
     j.bytes=bytes;j.status='done';j.error='';
    }catch(e){j.status='error';j.error=String(e.message||e);failed++;}
    completed++;progress(completed,pending.length,`${completed} of ${pending.length}`);render();
