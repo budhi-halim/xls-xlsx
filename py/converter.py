@@ -288,6 +288,9 @@ def read_binary(data:bytes):
 def convert_bytes(data:bytes,filename:str='input.xls'):
     kind=detect(data)
     if kind is None:raise ValueError('Unsupported Excel file format')
+    if kind=='xlsx':
+        wb=load_workbook(io.BytesIO(data),read_only=True)
+        return data,'xlsx',len(wb.sheetnames)
     if kind=='xml':wb=read_excel_xml(data)
     elif kind=='html':wb=read_html_xls(data)
     elif kind=='biff':wb=read_binary(data)
