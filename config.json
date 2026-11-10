@@ -1,0 +1,5 @@
+{
+  "packages": ["openpyxl", "xlrd", "beautifulsoup4"],
+  "files": {"./py/converter.py": "./converter.py"},
+  "experimental_create_proxy": "auto"
+}
