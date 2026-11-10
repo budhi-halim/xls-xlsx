@@ -1,38 +1,36 @@
-# XLS to XLSX Converter
+# XLS to XLSX
 
-A client-side spreadsheet converter for mobile and desktop browsers.
+Static, client-side spreadsheet converter for mobile and desktop browsers.
 
-**Application:** https://budhi-halim.github.io/xls-xlsx/
+**Web app:** https://budhi-halim.github.io/xls-xlsx/
 
-## Supported files
+## Formats
 
-| Input | Handling |
-| --- | --- |
-| Excel 2003 SpreadsheetML (.xls, .xml) | Dedicated XML parser; retains worksheet names, cell contents, merged ranges, number formats, borders, colors, and alignment |
-| HTML table exported as .xls | Dedicated HTML parser; preserves table structure, spans, styled sections, and numeric Rupiah amounts |
-| Excel 97–2003 binary .xls | SheetJS Community Edition 0.20.3 fallback |
-| .xlsx | Returned unchanged |
+The converter reads the file contents to detect the actual format, regardless of whether it has a misleading `.xls` extension.
 
-The converter detects the underlying file format from its contents, not its extension. XML and HTML files are processed without external dependencies. Binary XLS uses a static SheetJS library fetched on demand. ZIP download uses JSZip from a CDN; individual XLSX downloads do not need JSZip.
+- Excel 2003 SpreadsheetML XML — parsed with Python `xml.etree.ElementTree`
+- HTML report saved as XLS — parsed with Python `beautifulsoup4`
+- Traditional binary XLS — parsed with `xlrd`
+- Modern XLSX — opened and saved with `openpyxl`
 
-All processing is performed in the user's browser. Source spreadsheet contents are not uploaded.
+XLSX output is created with `openpyxl`. The program preserves worksheet names, cell values, numerical types, merged ranges, and applicable fonts, colors, borders, alignment, and number formats. Specialized Excel components that do not exist in the source parser (such as embedded objects and VBA macros) are not preserved.
 
-## Validation
+## Browser runtime
 
-The custom XML and HTML converter was tested against six original .xls samples and their separately generated Python-based XLSX references (three Laporan and three Rekap). For all three Rekap samples, every populated cell and merged range matched the reference. For Laporan, the source cell data, worksheet names, and merged ranges were preserved. The reference conversion had placed some final-row total values at different cell addresses; this converter retains their positions from the source XML.
+The app uses [PyScript 2025.8.1](https://pyscript.net/) / Pyodide with `openpyxl`, `xlrd`, and `beautifulsoup4`. The browser downloads the runtime and libraries on first use; file data is processed locally and never uploaded.
 
-Tests covered browser conversion, single-file downloads, simultaneous Laporan/Rekap selection, and mobile-sized layouts. Converted files were independently imported with a spreadsheet library to check workbook validity. The six private reports are not included in this public repository.
+Select one or more files, choose Convert, then download individual XLSX files or a batch ZIP.
 
-## Local development
+## Testing
 
-In PowerShell, with the repository folder as the working directory:
+The Python engine was checked against six original company reports:
+- Three Excel 2003 XML Laporan files (two worksheets each)
+- Three HTML-format Rekap files (one worksheet each)
 
-```powershell
-py -m http.server 8000
-```
+All three Rekap results matched the reference workbooks on populated cell values and merges. The three Laporan files retained both worksheets, their dimensions, and merges; this implementation also preserves several original summary cells omitted in the older reference conversions. Colors are exported as opaque ARGB to retain Excel formatting.
 
-Open http://localhost:8000/. No build step or backend is required.
+These are local Python-engine tests. A complete end-to-end conversion in the deployed PyScript browser UI should be checked independently before describing it as production-verified.
 
-## Limitations
+## Deployment
 
-No guarantee of perfect preservation for charts, macros, embedded objects, and advanced features in arbitrary legacy files. In particular, the binary XLS fallback may not preserve all visual formatting. Review business-critical converted workbooks before replacing the originals.
+No build or server is required. Publish the repository's root folder using GitHub Pages.
